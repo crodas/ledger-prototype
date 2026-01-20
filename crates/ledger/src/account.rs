@@ -1,6 +1,7 @@
 pub type Id = u32;
 
 /// Account types
+#[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
     /// Normal account types
     Main,
@@ -24,6 +25,7 @@ pub enum Status {
 }
 
 /// Internal full Account Id
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullAccount((Id, Type));
 
 impl From<Id> for FullAccount {
@@ -35,8 +37,8 @@ impl From<Id> for FullAccount {
 impl FullAccount {
     pub fn to_bytes(&self) -> [u8; 5] {
         let mut bytes = [0u8; 5];
-        bytes[..4].copy_from_slice(&self.0 .0.to_le_bytes());
-        bytes[4] = self.0 .1.to_byte();
+        bytes[..4].copy_from_slice(&self.0.0.to_le_bytes());
+        bytes[4] = self.0.1.to_byte();
         bytes
     }
 }

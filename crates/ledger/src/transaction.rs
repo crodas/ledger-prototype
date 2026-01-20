@@ -1,8 +1,26 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use sha2::{Digest, Sha256};
 
-use crate::{Amount, FullAccount};
+use crate::{Amount, FullAccount, Reference};
 
 pub type HashId = [u8; 32];
+
+#[derive(Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Copy)]
+pub struct UtxoId {
+    id: HashId,
+    pos: u8,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Invalid From in Tx")]
+    InvalidFrom,
+    #[error("Invalid To in Tx")]
+    InvalidTo,
+    #[error("Imbanced transaction")]
+    Imbalanced,
+}
 
 /// Unspent transaction Output
 ///
@@ -14,27 +32,81 @@ pub type HashId = [u8; 32];
 /// guaranteed by our storage layer.
 ///
 /// This also enable atomic multi-step movement of assets in a single transaction.
+#[derive(Debug, Clone, Copy)]
 pub struct Utxo {
-    tx: HashId,
-    pos: u8,
+    id: UtxoId,
+    amount: Amount,
 }
 
 impl Utxo {
+    pub fn new(id: UtxoId, amount: Amount) -> Self {
+        Self { id, amount }
+    }
+
     fn to_bytes(&self) -> [u8; 33] {
         let mut bytes = [0u8; 33];
-        bytes[..32].copy_from_slice(&self.tx);
-        bytes[32] = self.pos;
+        bytes[..32].copy_from_slice(&self.id.id);
+        bytes[32] = self.id.pos;
         bytes
+    }
+
+    pub fn amount(&self) -> Amount {
+        self.amount
     }
 }
 
-/// Simplified version
+/// Simplified version of an transaction, lot of details are left out due to time constraints
+///
+/// By design all transactions are final, to mimic statuses and the lifecycle of transactions it
+/// would be achieved in another level with multiple accounts type (user.pending, user.available,
+/// user.hold, etc)
+#[derive(Debug, Clone)]
 pub struct Transaction {
     from: Vec<Utxo>,
     to: Vec<(FullAccount, Amount)>,
+    reference: Reference,
+    timestamp: u64,
 }
 
 impl Transaction {
+    pub fn new(
+        from: Vec<Utxo>,
+        to: Vec<(FullAccount, Amount)>,
+        reference: Reference,
+        timestamp: Option<u64>,
+    ) -> Result<Self, Error> {
+        if from.is_empty() && to.is_empty() {
+            return Err(Error::InvalidFrom);
+        }
+
+        if !from.is_empty() && !to.is_empty() {
+            let spending: i128 = from.iter().map(|input| *input.amount).sum();
+            let receiving = to.iter().map(|(_, amount)| **amount).sum();
+
+            if spending != receiving {
+                return Err(Error::Imbalanced);
+            }
+
+            if spending <= 0 {
+                return Err(Error::InvalidFrom);
+            }
+        }
+
+        let timestamp = timestamp.unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_micros() as u64
+        });
+
+        Ok(Self {
+            from,
+            to,
+            timestamp,
+            reference,
+        })
+    }
+
     pub fn id(&self) -> HashId {
         // SHA256(inputs)
         let mut inputs_hasher = Sha256::new();
@@ -51,10 +123,12 @@ impl Transaction {
         }
         let outputs_hash = outputs_hasher.finalize();
 
-        // SHA256(SHA256(inputs) + SHA256(outputs))
+        // SHA256(SHA256(inputs) + SHA256(outputs) + timestamp + reference)
         let mut final_hasher = Sha256::new();
         final_hasher.update(inputs_hash);
         final_hasher.update(outputs_hash);
+        final_hasher.update(self.timestamp.to_le_bytes());
+        final_hasher.update(self.reference.as_bytes());
         final_hasher.finalize().into()
     }
 }

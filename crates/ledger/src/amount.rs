@@ -1,3 +1,5 @@
+use std::{iter::Sum, ops::Deref};
+
 /// Amount
 ///
 /// The ledger supports negative and positive numbers. By definition the ledger is append only, and
@@ -8,6 +10,14 @@ pub struct Amount(i128);
 impl From<i128> for Amount {
     fn from(value: i128) -> Self {
         Amount(value)
+    }
+}
+
+impl Deref for Amount {
+    type Target = i128;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
