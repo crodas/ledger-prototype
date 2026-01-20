@@ -7,7 +7,7 @@ mod transaction;
 
 use std::sync::Arc;
 
-use storage::Storage;
+use storage::{Memory, Storage};
 use transaction::{HashId, Transaction};
 
 pub use self::{
@@ -44,12 +44,22 @@ where
     storage: Arc<S>, // TODO: implement
 }
 
+impl Default for Ledger<Memory> {
+    fn default() -> Self {
+        Ledger {
+            storage: Arc::new(Memory::default()),
+        }
+    }
+}
+
 impl<S> Ledger<S>
 where
     S: Storage,
 {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(storage: S) -> Self {
+        Ledger {
+            storage: Arc::new(storage),
+        }
     }
 
     pub async fn deposit(

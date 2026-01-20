@@ -12,8 +12,17 @@ pub enum Error {
     #[error("Missing utxo {0:?}")]
     MissingUtxo(UtxoId),
 
+    #[error("Spent utxo {0:?}")]
+    SpentUtxo(UtxoId),
+
+    #[error("Mismatch amount between the stored utxo and the tx utxo")]
+    MismatchAmount,
+
     #[error("Math error")]
     Math,
+
+    #[error("Duplicate")]
+    Duplicate,
 }
 
 /// Extremely simple storage layer

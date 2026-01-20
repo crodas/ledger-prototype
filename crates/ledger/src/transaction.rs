@@ -38,6 +38,15 @@ pub struct Utxo {
     amount: Amount,
 }
 
+impl From<(HashId, u8)> for UtxoId {
+    fn from(value: (HashId, u8)) -> Self {
+        UtxoId {
+            id: value.0,
+            pos: value.1,
+        }
+    }
+}
+
 impl Utxo {
     pub fn new(id: UtxoId, amount: Amount) -> Self {
         Self { id, amount }
@@ -48,6 +57,10 @@ impl Utxo {
         bytes[..32].copy_from_slice(&self.id.id);
         bytes[32] = self.id.pos;
         bytes
+    }
+
+    pub fn id(&self) -> UtxoId {
+        self.id
     }
 
     pub fn amount(&self) -> Amount {
@@ -105,6 +118,14 @@ impl Transaction {
             timestamp,
             reference,
         })
+    }
+
+    pub fn inputs(&self) -> &[Utxo] {
+        &self.from
+    }
+
+    pub fn outputs(&self) -> &[(FullAccount, Amount)] {
+        &self.to
     }
 
     pub fn id(&self) -> HashId {

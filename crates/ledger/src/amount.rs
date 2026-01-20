@@ -1,4 +1,4 @@
-use std::{iter::Sum, ops::Deref};
+use std::ops::Deref;
 
 /// Amount
 ///
