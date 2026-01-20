@@ -156,8 +156,13 @@ mod tests {
         reference: &str,
         timestamp: u64,
     ) -> Transaction {
-        Transaction::new(vec![], vec![(account, amount)], reference.to_string(), Some(timestamp))
-            .expect("deposit transaction should be valid")
+        Transaction::new(
+            vec![],
+            vec![(account, amount)],
+            reference.to_string(),
+            Some(timestamp),
+        )
+        .expect("deposit transaction should be valid")
     }
 
     fn make_utxo(tx_id: HashId, pos: u8, amount: Amount) -> Utxo {

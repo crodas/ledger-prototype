@@ -8,7 +8,7 @@ mod transaction;
 use std::sync::Arc;
 
 use storage::{Memory, Storage};
-use transaction::{HashId, Transaction};
+use transaction::{HashId, Transaction, Utxo};
 
 pub use self::{
     account::{FullAccount, Id as AccountId, Type as AccountType},
@@ -86,21 +86,41 @@ where
             .await?;
 
         let total: i128 = inputs.iter().map(|x| *x.amount()).sum();
-        let change = if total < *amount {
+        let (id, transactions) = if total < *amount {
             return Err(Error::NotEnough);
         } else if total > *amount {
-            vec![(
-                account.into(),
-                (total.checked_sub(*amount).ok_or(Error::Math)?.into()),
-            )]
+            // The selected inputs are more than the requested amount to withdraw, so an
+            // intermediate tx is needed, since the design of ledger does not allow imbalanced
+            // transactions (except for deposit and withdrawal, but for that to happen one side if
+            // empty)
+            let exchange_tx = Transaction::new(
+                inputs,
+                vec![
+                    (account.into(), amount), // amount to the withdrawl
+                    (
+                        account.into(),
+                        total.checked_sub(*amount).ok_or(Error::Math)?.into(), // exchange
+                    ),
+                ],
+                "".to_owned(),
+                None,
+            )?;
+            let withdrawl = Transaction::new(
+                vec![Utxo::new((exchange_tx.id(), 0u8).into(), amount)],
+                vec![],
+                reference,
+                None,
+            )?;
+            (withdrawl.id(), vec![exchange_tx, withdrawl])
         } else {
-            vec![]
+            // a single transaction
+            let withdrawal = Transaction::new(inputs, vec![], reference, None)?;
+            (withdrawal.id(), vec![withdrawal])
         };
 
-        let new_tx = Transaction::new(inputs, change, reference, None)?;
-        let id = new_tx.id();
-
-        self.storage.store_tx(new_tx).await?;
+        for tx in transactions {
+            self.storage.store_tx(tx).await?;
+        }
 
         Ok(id)
     }
