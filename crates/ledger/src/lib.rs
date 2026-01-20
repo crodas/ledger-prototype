@@ -105,7 +105,220 @@ where
         Ok(id)
     }
 
-    pub fn movement(&mut self, from: AccountId, to: AccountId, amount: Amount) {
+    pub fn movement(&mut self, _from: AccountId, _to: AccountId, _amount: Amount) {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_deposit_creates_balance() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        let tx_id = ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Verify the transaction was created (non-zero hash)
+        assert_ne!(tx_id, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_deposit_and_withdraw_exact_amount() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Withdraw exactly 100
+        let tx_id = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 100.into())
+            .await
+            .expect("exact withdrawal should succeed");
+
+        assert_ne!(tx_id, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_withdraw_partial_amount() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Withdraw 60 (partial)
+        let tx_id = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 60.into())
+            .await
+            .expect("partial withdrawal should succeed");
+
+        assert_ne!(tx_id, [0u8; 32]);
+
+        // Should be able to withdraw remaining 40
+        let tx_id2 = ledger
+            .withdraw(account_id, "withdraw-2".to_string(), 40.into())
+            .await
+            .expect("withdrawing remaining balance should succeed");
+
+        assert_ne!(tx_id2, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_over_withdrawal_not_possible() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Try to withdraw 150 - should fail
+        let result = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 150.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+    }
+
+    #[tokio::test]
+    async fn test_withdraw_from_empty_account() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Try to withdraw without any deposit
+        let result = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 50.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_deposits_accumulate() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 50 three times
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 50.into())
+            .await
+            .expect("first deposit should succeed");
+        ledger
+            .deposit(account_id, "deposit-2".to_string(), 50.into())
+            .await
+            .expect("second deposit should succeed");
+        ledger
+            .deposit(account_id, "deposit-3".to_string(), 50.into())
+            .await
+            .expect("third deposit should succeed");
+
+        // Withdraw 120 (needs multiple UTXOs)
+        let tx_id = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 120.into())
+            .await
+            .expect("withdrawal using multiple UTXOs should succeed");
+
+        assert_ne!(tx_id, [0u8; 32]);
+
+        // Should have 30 left
+        let tx_id2 = ledger
+            .withdraw(account_id, "withdraw-2".to_string(), 30.into())
+            .await
+            .expect("withdrawing remaining balance should succeed");
+
+        assert_ne!(tx_id2, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_cannot_withdraw_more_than_remaining_after_partial() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Withdraw 70
+        ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 70.into())
+            .await
+            .expect("partial withdrawal should succeed");
+
+        // Try to withdraw 50 (only 30 remaining) - should fail
+        let result = ledger
+            .withdraw(account_id, "withdraw-2".to_string(), 50.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+    }
+
+    #[tokio::test]
+    async fn test_different_accounts_isolated() {
+        let mut ledger = Ledger::default();
+        let account1: AccountId = 1;
+        let account2: AccountId = 2;
+
+        // Deposit to account1
+        ledger
+            .deposit(account1, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit to account1 should succeed");
+
+        // Try to withdraw from account2 - should fail (no balance)
+        let result = ledger
+            .withdraw(account2, "withdraw-1".to_string(), 50.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+
+        // Account1 should still be able to withdraw
+        let tx_id = ledger
+            .withdraw(account1, "withdraw-2".to_string(), 100.into())
+            .await
+            .expect("withdrawal from account1 should succeed");
+
+        assert_ne!(tx_id, [0u8; 32]);
+    }
+
+    #[tokio::test]
+    async fn test_withdraw_exact_balance_leaves_nothing() {
+        let mut ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Withdraw exactly 100
+        ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 100.into())
+            .await
+            .expect("exact withdrawal should succeed");
+
+        // Try to withdraw even 1 - should fail
+        let result = ledger
+            .withdraw(account_id, "withdraw-2".to_string(), 1.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
     }
 }

@@ -94,7 +94,7 @@ impl Transaction {
 
         if !from.is_empty() && !to.is_empty() {
             let spending: i128 = from.iter().map(|input| *input.amount).sum();
-            let receiving = to.iter().map(|(_, amount)| **amount).sum();
+            let receiving: i128 = to.iter().map(|(_, amount)| **amount).sum();
 
             if spending != receiving {
                 return Err(Error::Imbalanced);

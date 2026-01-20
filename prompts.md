@@ -12,3 +12,13 @@ Extend the transaction and add a timestamp. Add a microsecond timestamp. Also ad
 --
 
 Change the transaction, if None is passed as a timestamp use the system microsecond
+
+--
+
+Add unit tests for the ledger using the in memory storage. Add also tests for the in memory tests. Focus on the correctness of the storage and that an spent utxo cannot be spent twice. Also check the ifs branches inside the in-memory storage impl.
+
+In the ledger tests focus on deposit and withdrawal. Focus on withdrawal and check that overwithdrawl is not possible.
+
+Don't use unwrap, instead use expect with a meaningful error message
+
+--
