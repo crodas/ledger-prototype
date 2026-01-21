@@ -491,4 +491,133 @@ mod tests {
         assert_eq!(unspent2.len(), 1);
         assert_eq!(*unspent2[0].amount(), 200);
     }
+
+    #[tokio::test]
+    async fn test_get_tx_by_reference_returns_transaction() {
+        let storage = Memory::default();
+        let account = make_account(1);
+
+        let tx = make_deposit_tx(account, 100.into(), "deposit-1", 1000);
+        let tx_id = tx.id();
+        storage
+            .store_tx(tx)
+            .await
+            .expect("store_tx should succeed");
+
+        let result = storage
+            .get_tx_by_reference(&account, &"deposit-1".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed");
+
+        assert!(result.is_some());
+        let found_tx = result.unwrap();
+        assert_eq!(found_tx.id(), tx_id);
+        assert_eq!(found_tx.reference(), "deposit-1");
+    }
+
+    #[tokio::test]
+    async fn test_get_tx_by_reference_nonexistent_returns_none() {
+        let storage = Memory::default();
+        let account = make_account(1);
+
+        let tx = make_deposit_tx(account, 100.into(), "deposit-1", 1000);
+        storage
+            .store_tx(tx)
+            .await
+            .expect("store_tx should succeed");
+
+        let result = storage
+            .get_tx_by_reference(&account, &"nonexistent".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_tx_by_reference_wrong_account_returns_none() {
+        let storage = Memory::default();
+        let account1 = make_account(1);
+        let account2 = make_account(2);
+
+        let tx = make_deposit_tx(account1, 100.into(), "deposit-1", 1000);
+        storage
+            .store_tx(tx)
+            .await
+            .expect("store_tx should succeed");
+
+        // Try to get the transaction with the right reference but wrong account
+        let result = storage
+            .get_tx_by_reference(&account2, &"deposit-1".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_reference_same_account_rejected() {
+        let storage = Memory::default();
+        let account = make_account(1);
+
+        let tx1 = make_deposit_tx(account, 100.into(), "deposit-1", 1000);
+        storage
+            .store_tx(tx1)
+            .await
+            .expect("first store_tx should succeed");
+
+        // Different transaction with same reference should fail
+        let tx2 = make_deposit_tx(account, 50.into(), "deposit-1", 2000);
+        let result = storage.store_tx(tx2).await;
+
+        assert!(matches!(result, Err(Error::Duplicate)));
+    }
+
+    #[tokio::test]
+    async fn test_same_reference_different_accounts_allowed() {
+        let storage = Memory::default();
+        let account1 = make_account(1);
+        let account2 = make_account(2);
+
+        let tx1 = make_deposit_tx(account1, 100.into(), "deposit-1", 1000);
+        storage
+            .store_tx(tx1)
+            .await
+            .expect("first store_tx should succeed");
+
+        // Same reference but different account should succeed
+        let tx2 = make_deposit_tx(account2, 50.into(), "deposit-1", 2000);
+        storage
+            .store_tx(tx2)
+            .await
+            .expect("second store_tx with same reference different account should succeed");
+
+        // Verify both transactions exist
+        let result1 = storage
+            .get_tx_by_reference(&account1, &"deposit-1".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed");
+        let result2 = storage
+            .get_tx_by_reference(&account2, &"deposit-1".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed");
+
+        assert!(result1.is_some());
+        assert!(result2.is_some());
+        // They should be different transactions
+        assert_ne!(result1.unwrap().id(), result2.unwrap().id());
+    }
+
+    #[tokio::test]
+    async fn test_get_tx_by_reference_empty_storage_returns_none() {
+        let storage = Memory::default();
+        let account = make_account(1);
+
+        let result = storage
+            .get_tx_by_reference(&account, &"any-reference".to_string())
+            .await
+            .expect("get_tx_by_reference should succeed for empty storage");
+
+        assert!(result.is_none());
+    }
 }

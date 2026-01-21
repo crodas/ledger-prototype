@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let file = File::open(&args[1])?;
     let mut reader = Reader::from_reader(file);
 
-    let ledger = Ledger::default();
+    let _ledger = Ledger::default();
 
     for result in reader.records() {
         let record = result?;

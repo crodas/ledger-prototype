@@ -22,3 +22,9 @@ In the ledger tests focus on deposit and withdrawal. Focus on withdrawal and che
 Don't use unwrap, instead use expect with a meaningful error message
 
 --
+
+Add more tests. Cover the new functions added (Ledger::dispute, asume the user always have more or enough credit to cover their dispute).
+
+Also test transactions with duplicate references and get_tx_by_reference
+
+Add a tests where user have 3 deposits (a: 10, b: 5), withdraw 11, then deposit (c: 4), then disput b. The test will check the dispute work after the utxos has been shuffled.

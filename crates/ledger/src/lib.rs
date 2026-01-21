@@ -407,4 +407,158 @@ mod tests {
 
         assert!(matches!(result, Err(Error::NotEnough)));
     }
+
+    #[tokio::test]
+    async fn test_dispute_moves_funds_to_held_exact_amount() {
+        let ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Dispute the deposit
+        ledger
+            .dispute(account_id, "deposit-1".to_string())
+            .await
+            .expect("dispute should succeed");
+
+        // After dispute, main account should have no funds
+        let result = ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 1.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+    }
+
+    #[tokio::test]
+    async fn test_dispute_nonexistent_reference_fails() {
+        let ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Try to dispute a non-existent reference
+        let result = ledger
+            .dispute(account_id, "nonexistent-ref".to_string())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_dispute_transfer_fails_wrong_type() {
+        let ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit 100
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit should succeed");
+
+        // Partial withdraw creates an exchange transaction which has both inputs and outputs
+        ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 50.into())
+            .await
+            .expect("withdrawal should succeed");
+
+        // Try to dispute the exchange transaction (has inputs, so it's not a deposit)
+        // The exchange tx has reference "Exchange for withdraw-1"
+        let result = ledger
+            .dispute(account_id, "Exchange for withdraw-1".to_string())
+            .await;
+
+        assert!(matches!(result, Err(Error::WrongType)));
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_deposit_reference_fails() {
+        let ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // First deposit
+        ledger
+            .deposit(account_id, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("first deposit should succeed");
+
+        // Second deposit with same reference should fail
+        let result = ledger
+            .deposit(account_id, "deposit-1".to_string(), 50.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::Storage(storage::Error::Duplicate))));
+    }
+
+    #[tokio::test]
+    async fn test_same_reference_different_accounts_succeeds() {
+        let ledger = Ledger::default();
+        let account1: AccountId = 1;
+        let account2: AccountId = 2;
+
+        // Deposit to account1
+        ledger
+            .deposit(account1, "deposit-1".to_string(), 100.into())
+            .await
+            .expect("deposit to account1 should succeed");
+
+        // Deposit to account2 with same reference should succeed (different accounts)
+        ledger
+            .deposit(account2, "deposit-1".to_string(), 50.into())
+            .await
+            .expect("deposit to account2 with same reference should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_dispute_after_utxo_shuffle() {
+        let ledger = Ledger::default();
+        let account_id: AccountId = 1;
+
+        // Deposit a: 10
+        ledger
+            .deposit(account_id, "a".to_string(), 10.into())
+            .await
+            .expect("deposit a should succeed");
+
+        // Deposit b: 5
+        ledger
+            .deposit(account_id, "b".to_string(), 5.into())
+            .await
+            .expect("deposit b should succeed");
+
+        // Withdraw 11 - this consumes both UTXOs and creates exchange (15-11=4 remaining)
+        ledger
+            .withdraw(account_id, "withdraw-1".to_string(), 11.into())
+            .await
+            .expect("withdrawal should succeed");
+
+        // Deposit c: 1 (chosen so exchange(4) + c(1) = 5, exactly matching disputed amount)
+        ledger
+            .deposit(account_id, "c".to_string(), 1.into())
+            .await
+            .expect("deposit c should succeed");
+
+        // At this point: UTXOs are shuffled - we have exchange(4) + c(1) = 5 total
+        // Original deposits a and b UTXOs are spent, but their tx records remain
+
+        // Dispute b (5) - should find original deposit tx by reference and move 5 to held
+        ledger
+            .dispute(account_id, "b".to_string())
+            .await
+            .expect("dispute should succeed");
+
+        // After dispute: all 5 moved to held, 0 should remain in main account
+        let result = ledger
+            .withdraw(account_id, "withdraw-2".to_string(), 1.into())
+            .await;
+
+        assert!(matches!(result, Err(Error::NotEnough)));
+    }
 }
