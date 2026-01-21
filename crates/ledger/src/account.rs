@@ -1,4 +1,4 @@
-pub type Id = u32;
+pub type Id = u16;
 
 /// Account types
 #[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,10 +41,10 @@ impl From<(Id, Type)> for FullAccount {
 }
 
 impl FullAccount {
-    pub fn to_bytes(&self) -> [u8; 5] {
-        let mut bytes = [0u8; 5];
-        bytes[..4].copy_from_slice(&self.0.0.to_le_bytes());
-        bytes[4] = self.0.1.to_byte();
+    pub fn to_bytes(&self) -> [u8; 3] {
+        let mut bytes = [0u8; 3];
+        bytes[..2].copy_from_slice(&self.0.0.to_le_bytes());
+        bytes[2] = self.0.1.to_byte();
         bytes
     }
 }

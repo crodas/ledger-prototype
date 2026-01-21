@@ -1,10 +1,11 @@
 use std::env;
 use std::error::Error;
-use std::fs::File;
 
-use csv::{Reader, Trim};
-use ledger::{AccountId, Ledger, Reference};
+use csv::Trim;
+use ledger::{AccountId, Amount, Ledger};
 use serde::Deserialize;
+
+pub const AMOUNT_PRECISION: u8 = 4;
 
 #[derive(Deserialize, Clone, Debug)]
 enum Action {
@@ -25,7 +26,7 @@ struct CsvEntry {
     #[serde(rename = "type")]
     typ: Action,
     client: AccountId,
-    tx: Reference,
+    tx: u32,
     #[serde(default)]
     amount: Option<f64>,
 }
@@ -52,8 +53,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         };
 
+        let amount = match record
+            .amount
+            .map(|x| Amount::from_f64(x, AMOUNT_PRECISION))
+            .transpose()
+        {
+            Ok(amount) => amount,
+            Err(err) => {
+                println!("Error parsing the amount {err}");
+                continue;
+            }
+        };
+
         // TODO: parse record and call ledger methods
-        println!("{:?}", record);
+        println!("{:?} {:?}", record, amount);
     }
 
     Ok(())

@@ -176,9 +176,11 @@ impl Storage for Memory {
 
 #[cfg(test)]
 mod tests {
+    use crate::AccountId;
+
     use super::*;
 
-    fn make_account(id: u32) -> FullAccount {
+    fn make_account(id: AccountId) -> FullAccount {
         id.into()
     }
 
