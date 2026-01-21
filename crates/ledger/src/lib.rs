@@ -232,6 +232,13 @@ where
 mod tests {
     use super::*;
 
+    async fn assert_balance(ledger: &Ledger<Memory>, account: AccountId, main: i128, disputed: i128) {
+        let balances = ledger.get_balances(account).await.expect("get_balances should succeed");
+        assert_eq!(*balances.main, main, "main balance mismatch");
+        assert_eq!(*balances.disputed, disputed, "disputed balance mismatch");
+        assert_eq!(*balances.total, main - disputed, "total balance mismatch");
+    }
+
     #[tokio::test]
     async fn test_deposit_creates_balance() {
         let ledger = Ledger::default();
@@ -244,6 +251,9 @@ mod tests {
 
         // Verify the transaction was created (non-zero hash)
         assert_ne!(tx_id, [0u8; 32]);
+
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
     }
 
     #[tokio::test]
@@ -257,6 +267,9 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Withdraw exactly 100
         let tx_id = ledger
             .withdraw(account_id, "withdraw-1".to_string(), 100.into())
@@ -264,6 +277,9 @@ mod tests {
             .expect("exact withdrawal should succeed");
 
         assert_ne!(tx_id, [0u8; 32]);
+
+        // Verify balance after withdrawal
+        assert_balance(&ledger, account_id, 0, 0).await;
     }
 
     #[tokio::test]
@@ -277,6 +293,9 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Withdraw 60 (partial)
         let tx_id = ledger
             .withdraw(account_id, "withdraw-1".to_string(), 60.into())
@@ -285,6 +304,9 @@ mod tests {
 
         assert_ne!(tx_id, [0u8; 32]);
 
+        // Verify balance after first withdrawal
+        assert_balance(&ledger, account_id, 40, 0).await;
+
         // Should be able to withdraw remaining 40
         let tx_id2 = ledger
             .withdraw(account_id, "withdraw-2".to_string(), 40.into())
@@ -292,6 +314,9 @@ mod tests {
             .expect("withdrawing remaining balance should succeed");
 
         assert_ne!(tx_id2, [0u8; 32]);
+
+        // Verify balance after second withdrawal
+        assert_balance(&ledger, account_id, 0, 0).await;
     }
 
     #[tokio::test]
@@ -305,18 +330,27 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Try to withdraw 150 - should fail
         let result = ledger
             .withdraw(account_id, "withdraw-1".to_string(), 150.into())
             .await;
 
         assert!(matches!(result, Err(Error::NotEnough)));
+
+        // Verify balance unchanged after failed withdrawal
+        assert_balance(&ledger, account_id, 100, 0).await;
     }
 
     #[tokio::test]
     async fn test_withdraw_from_empty_account() {
         let ledger = Ledger::default();
         let account_id: AccountId = 1;
+
+        // Verify balance is 0 before any operation
+        assert_balance(&ledger, account_id, 0, 0).await;
 
         // Try to withdraw without any deposit
         let result = ledger
@@ -345,6 +379,9 @@ mod tests {
             .await
             .expect("third deposit should succeed");
 
+        // Verify balance after 3 deposits
+        assert_balance(&ledger, account_id, 150, 0).await;
+
         // Withdraw 120 (needs multiple UTXOs)
         let tx_id = ledger
             .withdraw(account_id, "withdraw-1".to_string(), 120.into())
@@ -353,6 +390,9 @@ mod tests {
 
         assert_ne!(tx_id, [0u8; 32]);
 
+        // Verify balance after first withdrawal
+        assert_balance(&ledger, account_id, 30, 0).await;
+
         // Should have 30 left
         let tx_id2 = ledger
             .withdraw(account_id, "withdraw-2".to_string(), 30.into())
@@ -360,6 +400,9 @@ mod tests {
             .expect("withdrawing remaining balance should succeed");
 
         assert_ne!(tx_id2, [0u8; 32]);
+
+        // Verify balance after second withdrawal
+        assert_balance(&ledger, account_id, 0, 0).await;
     }
 
     #[tokio::test]
@@ -373,11 +416,17 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Withdraw 70
         ledger
             .withdraw(account_id, "withdraw-1".to_string(), 70.into())
             .await
             .expect("partial withdrawal should succeed");
+
+        // Verify balance after first withdrawal
+        assert_balance(&ledger, account_id, 30, 0).await;
 
         // Try to withdraw 50 (only 30 remaining) - should fail
         let result = ledger
@@ -399,6 +448,10 @@ mod tests {
             .await
             .expect("deposit to account1 should succeed");
 
+        // Verify balances: account1 has 100, account2 has 0
+        assert_balance(&ledger, account1, 100, 0).await;
+        assert_balance(&ledger, account2, 0, 0).await;
+
         // Try to withdraw from account2 - should fail (no balance)
         let result = ledger
             .withdraw(account2, "withdraw-1".to_string(), 50.into())
@@ -413,6 +466,9 @@ mod tests {
             .expect("withdrawal from account1 should succeed");
 
         assert_ne!(tx_id, [0u8; 32]);
+
+        // Verify balance after withdrawal: account1 has 0
+        assert_balance(&ledger, account1, 0, 0).await;
     }
 
     #[tokio::test]
@@ -431,6 +487,9 @@ mod tests {
             .withdraw(account_id, "withdraw-1".to_string(), 100.into())
             .await
             .expect("exact withdrawal should succeed");
+
+        // Verify balance after withdrawal
+        assert_balance(&ledger, account_id, 0, 0).await;
 
         // Try to withdraw even 1 - should fail
         let result = ledger
@@ -451,11 +510,17 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Dispute the deposit
         ledger
             .dispute(account_id, "deposit-1".to_string())
             .await
             .expect("dispute should succeed");
+
+        // After dispute: main=0, disputed=100, total=-100
+        assert_balance(&ledger, account_id, 0, 100).await;
 
         // After dispute, main account should have no funds
         let result = ledger
@@ -476,12 +541,18 @@ mod tests {
             .await
             .expect("deposit should succeed");
 
+        // Verify balance after deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Try to dispute a non-existent reference
         let result = ledger
             .dispute(account_id, "nonexistent-ref".to_string())
             .await;
 
         assert!(matches!(result, Err(Error::NotFound)));
+
+        // Verify balance unchanged after failed dispute
+        assert_balance(&ledger, account_id, 100, 0).await;
     }
 
     #[tokio::test]
@@ -500,6 +571,9 @@ mod tests {
             .withdraw(account_id, "withdraw-1".to_string(), 50.into())
             .await
             .expect("withdrawal should succeed");
+
+        // Verify balance after withdrawal
+        assert_balance(&ledger, account_id, 50, 0).await;
 
         // Try to dispute the exchange transaction (has inputs, so it's not a deposit)
         // The exchange tx has reference "Exchange for withdraw-1"
@@ -521,6 +595,9 @@ mod tests {
             .await
             .expect("first deposit should succeed");
 
+        // Verify balance after first deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
+
         // Second deposit with same reference should fail
         let result = ledger
             .deposit(account_id, "deposit-1".to_string(), 50.into())
@@ -530,6 +607,9 @@ mod tests {
             result,
             Err(Error::Storage(storage::Error::Duplicate))
         ));
+
+        // Verify balance unchanged (still 100) after failed duplicate deposit
+        assert_balance(&ledger, account_id, 100, 0).await;
     }
 
     #[tokio::test]
@@ -549,6 +629,10 @@ mod tests {
             .deposit(account2, "deposit-1".to_string(), 50.into())
             .await
             .expect("deposit to account2 with same reference should succeed");
+
+        // Verify each account has correct balance
+        assert_balance(&ledger, account1, 100, 0).await;
+        assert_balance(&ledger, account2, 50, 0).await;
     }
 
     #[tokio::test]
@@ -562,11 +646,17 @@ mod tests {
             .await
             .expect("deposit a should succeed");
 
+        // Verify balance after deposit a
+        assert_balance(&ledger, account_id, 10, 0).await;
+
         // Deposit b: 5
         ledger
             .deposit(account_id, "b".to_string(), 5.into())
             .await
             .expect("deposit b should succeed");
+
+        // Verify balance after deposit b
+        assert_balance(&ledger, account_id, 15, 0).await;
 
         // Withdraw 11 - this consumes both UTXOs and creates exchange (15-11=4 remaining)
         ledger
@@ -574,11 +664,17 @@ mod tests {
             .await
             .expect("withdrawal should succeed");
 
+        // Verify balance after withdrawal
+        assert_balance(&ledger, account_id, 4, 0).await;
+
         // Deposit c: 1 (chosen so exchange(4) + c(1) = 5, exactly matching disputed amount)
         ledger
             .deposit(account_id, "c".to_string(), 1.into())
             .await
             .expect("deposit c should succeed");
+
+        // Verify balance after deposit c
+        assert_balance(&ledger, account_id, 5, 0).await;
 
         // At this point: UTXOs are shuffled - we have exchange(4) + c(1) = 5 total
         // Original deposits a and b UTXOs are spent, but their tx records remain
@@ -588,6 +684,9 @@ mod tests {
             .dispute(account_id, "b".to_string())
             .await
             .expect("dispute should succeed");
+
+        // After dispute: main=0, disputed=5, total=-5
+        assert_balance(&ledger, account_id, 0, 5).await;
 
         // After dispute: all 5 moved to held, 0 should remain in main account
         let result = ledger
