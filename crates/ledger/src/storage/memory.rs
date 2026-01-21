@@ -99,7 +99,7 @@ impl Storage for Memory {
                 .ok_or(Error::MissingUtxo(*utxo_id))?;
 
             if info.spent_at.is_some() {
-                // We already reached the end, as the store_tx will put the stored utox to the end
+                // We already reached the end, as the store_tx will put the stored utxo to the end
                 break;
             }
 
@@ -169,7 +169,7 @@ impl Storage for Memory {
             }
         }
 
-        // All check passed, now do the persitance
+        // All check passed, now do the persistence
         inner.txs.insert(tx_id, tx.clone());
 
         // mark the input utxo as spent by this transaction
@@ -182,7 +182,7 @@ impl Storage for Memory {
             in_memory_utxo.spent_at = Some(tx_id);
         }
 
-        // create the new utox
+        // create the new utxo
         for (pos, (account, amount)) in tx.outputs().iter().enumerate() {
             inner
                 .txs_by_account

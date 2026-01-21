@@ -49,3 +49,9 @@ The usage should be
 ```
 storage_test!(InMemory::default());
 ```
+
+--
+
+Fix documentation. Fix any typos. Document why and every external function. Deny by clippy anything missing.
+
+Document also the ledger in a markdown with mermaid. Focus on the UXTO and why it is an easy model to reason about.

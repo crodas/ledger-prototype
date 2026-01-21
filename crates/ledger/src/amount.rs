@@ -29,10 +29,21 @@ impl Deref for Amount {
 }
 
 impl Amount {
+    /// Serializes the amount to bytes for hashing and storage.
+    ///
+    /// Uses little-endian encoding for consistency across platforms.
     pub fn to_bytes(&self) -> [u8; 16] {
         self.0.to_le_bytes()
     }
 
+    /// Converts a floating-point number to an Amount with the given decimal precision.
+    ///
+    /// The precision indicates how many decimal places to preserve. For example,
+    /// with precision=2 (cents), 12.34 becomes 1234. Values are truncated toward
+    /// zero (not rounded) to ensure predictable behavior.
+    ///
+    /// # Errors
+    /// Returns `Error::Math` for NaN, infinity, or values outside i128 range.
     pub fn from_f64(number: f64, precision: u8) -> Result<Self, Error> {
         if !number.is_finite() {
             return Err(Error::Math);
@@ -52,6 +63,16 @@ impl Amount {
         Ok(Amount(chopped as i128))
     }
 
+    /// Converts the amount back to a floating-point number.
+    ///
+    /// The precision indicates how many decimal places the stored value represents.
+    /// For example, with precision=2, an amount of 1234 becomes 12.34.
+    ///
+    /// # Errors
+    /// Returns `Error::Math` if the result would be infinite or if precision is too large.
+    ///
+    /// # Note
+    /// Large i128 values may lose precision when converted to f64.
     pub fn to_f64(&self, precision: u8) -> Result<f64, Error> {
         // 10^precision as f64
         let scale = 10f64.powi(precision as i32);

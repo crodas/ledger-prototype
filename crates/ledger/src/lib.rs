@@ -1,4 +1,41 @@
-//! This is meant to be a generic simple ledger to record transaction movements
+//! A generic UTXO-based ledger for recording financial transaction movements.
+//!
+//! This crate implements a simplified UTXO (Unspent Transaction Output) model inspired by
+//! Bitcoin's architecture. The UTXO model provides several key advantages:
+//!
+//! - **Concurrency Safety**: Each UTXO can only be spent once, eliminating race conditions
+//! - **Atomic Operations**: Multi-step transactions are inherently atomic
+//! - **Auditability**: Complete transaction history is preserved and verifiable
+//! - **Simplicity**: Balance is the sum of unspent outputs, no running totals to reconcile
+//!
+//! # Architecture
+//!
+//! The ledger uses sub-accounts to track different states of funds:
+//! - `Main`: Normal available balance
+//! - `Disputed`: Funds under dispute, frozen from spending
+//! - `Chargeback`: Funds that have been charged back
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use ledger::{Ledger, Amount};
+//!
+//! async fn example() {
+//!     let ledger = Ledger::default();
+//!
+//!     // Deposit funds
+//!     let tx_id = ledger.deposit(1, "deposit-001".to_string(), Amount::from(1000)).await.unwrap();
+//!
+//!     // Check balance
+//!     let balance = ledger.get_balances(1).await.unwrap();
+//!     assert_eq!(*balance.available, 1000);
+//!
+//!     // Withdraw funds
+//!     ledger.withdraw(1, "withdraw-001".to_string(), Amount::from(500)).await.unwrap();
+//! }
+//! ```
+
+#![deny(missing_docs)]
 
 mod account;
 mod amount;
@@ -21,28 +58,43 @@ pub use self::{
     amount::Amount,
 };
 
+/// A unique identifier for a transaction within an account's context.
+///
+/// References allow external systems to idempotently track transactions and enable
+/// lookups for dispute resolution. Each reference must be unique per account.
 pub type Reference = String;
 
+/// Errors that can occur during ledger operations.
+///
+/// These errors represent the various failure modes when interacting with the ledger,
+/// from invalid transactions to storage failures.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Transaction validation failed (imbalanced, invalid inputs/outputs).
     #[error(transparent)]
     Tx(#[from] transaction::Error),
 
+    /// The requested resource (transaction, reference) was not found.
     #[error("Not found")]
     NotFound,
 
+    /// Operation attempted on wrong transaction type (e.g., disputing a withdrawal).
     #[error("Wrong transaction type")]
     WrongType,
 
+    /// Storage layer error (duplicate, missing UTXO, etc.).
     #[error(transparent)]
     Storage(#[from] storage::Error),
 
+    /// Insufficient funds in account for the requested operation.
     #[error("Not enough in account")]
     NotEnough,
 
+    /// Arithmetic overflow or underflow during calculation.
     #[error("Overflow or underflow error")]
     Math,
 
+    /// Internal invariant violation that should never occur.
     #[error("Invalid internal state")]
     Internal,
 }
@@ -67,15 +119,27 @@ impl Default for Ledger<Memory> {
     }
 }
 
+/// A snapshot of an account's balance breakdown across different states.
+///
+/// The UTXO model naturally separates funds by their state, making balance
+/// reconciliation straightforward: each category is simply the sum of its UTXOs.
 #[derive(Serialize, Deserialize, Clone, Debug, Copy)]
 pub struct Balances {
+    /// Funds available for withdrawal or transfer.
     pub available: Amount,
+    /// Funds currently under dispute, frozen from spending.
     pub disputed: Amount,
+    /// Funds that have been charged back and are no longer accessible.
     pub chargeback: Amount,
+    /// Sum of available and disputed funds (excludes chargebacks).
     pub total: Amount,
 }
 
-// A thing wrapper on top of the database removing sub-accounts
+/// A stream that yields unique account IDs, filtering out sub-accounts.
+///
+/// This is a thin wrapper over the storage layer's account stream that deduplicates
+/// accounts by their ID, hiding the internal sub-account structure (Main, Disputed,
+/// Chargeback) from callers who only need to enumerate distinct accounts.
 pub struct AccountIterator {
     inner: Box<dyn Stream<Item = Result<FullAccount, storage::Error>> + 'static + Unpin>,
     latest: Option<AccountId>,
@@ -109,12 +173,29 @@ impl<S> Ledger<S>
 where
     S: Storage,
 {
+    /// Creates a new ledger with the specified storage backend.
+    ///
+    /// This allows using custom storage implementations (e.g., database-backed)
+    /// instead of the default in-memory storage.
     pub fn new(storage: S) -> Self {
         Ledger {
             storage: Arc::new(storage),
         }
     }
 
+    /// Deposits funds into an account, creating new UTXOs.
+    ///
+    /// Deposits are transactions with no inputs and one output, effectively creating
+    /// new money in the system. The reference must be unique per account to ensure
+    /// idempotency and enable dispute lookups.
+    ///
+    /// # Arguments
+    /// * `account` - The account to credit
+    /// * `reference` - Unique identifier for this deposit (e.g., external transaction ID)
+    /// * `amount` - The amount to deposit in the lowest denomination
+    ///
+    /// # Returns
+    /// The transaction hash ID on success
     pub async fn deposit(
         &self,
         account: AccountId,
@@ -127,6 +208,10 @@ where
         Ok(tx_id)
     }
 
+    /// Returns a stream of all unique account IDs in the ledger.
+    ///
+    /// Sub-accounts (Disputed, Chargeback) are filtered out, returning only
+    /// distinct account identifiers. Useful for reporting and batch operations.
     pub async fn get_accounts(&self) -> impl Stream<Item = Result<AccountId, Error>> {
         AccountIterator {
             inner: Box::new(self.storage.get_accounts().await),
@@ -134,6 +219,11 @@ where
         }
     }
 
+    /// Retrieves the balance breakdown for an account.
+    ///
+    /// The UTXO model makes balance calculation straightforward: simply sum all
+    /// unspent outputs for each sub-account type. This naturally provides an
+    /// audit trail and prevents double-counting.
     pub async fn get_balances(&self, account: AccountId) -> Result<Balances, Error> {
         let main = self
             .storage
@@ -165,6 +255,20 @@ where
         })
     }
 
+    /// Withdraws funds from an account, consuming UTXOs.
+    ///
+    /// Withdrawals are transactions with inputs and no outputs, effectively removing
+    /// money from the system. The UTXO model handles coin selection automatically:
+    /// if selected UTXOs exceed the withdrawal amount, an intermediate "exchange"
+    /// transaction creates change back to the account.
+    ///
+    /// # Arguments
+    /// * `account` - The account to debit
+    /// * `reference` - Unique identifier for this withdrawal
+    /// * `amount` - The amount to withdraw in the lowest denomination
+    ///
+    /// # Errors
+    /// Returns `Error::NotEnough` if the account has insufficient available funds.
     pub async fn withdraw(
         &self,
         account: AccountId,
@@ -187,7 +291,7 @@ where
             let exchange_tx = Transaction::new(
                 inputs,
                 vec![
-                    (account.into(), amount), // amount to the withdrawl
+                    (account.into(), amount), // amount to the withdrawal
                     (
                         account.into(),
                         total.checked_sub(*amount).ok_or(Error::Math)?.into(), // exchange
@@ -196,13 +300,13 @@ where
                 format!("Exchange for {}", reference),
                 None,
             )?;
-            let withdrawl = Transaction::new(
+            let withdrawal = Transaction::new(
                 vec![Utxo::new((exchange_tx.id(), 0u8).into(), amount)],
                 vec![],
                 reference,
                 None,
             )?;
-            (withdrawl.id(), vec![exchange_tx, withdrawl])
+            (withdrawal.id(), vec![exchange_tx, withdrawal])
         } else {
             // a single transaction
             let withdrawal = Transaction::new(inputs, vec![], reference, None)?;
@@ -216,7 +320,19 @@ where
         Ok(id)
     }
 
-    /// Creates a dispute
+    /// Initiates a dispute on a deposit, freezing the disputed amount.
+    ///
+    /// Only deposits (transactions with no inputs) can be disputed. The disputed
+    /// amount is moved from the Main sub-account to the Disputed sub-account,
+    /// preventing it from being spent while the dispute is being investigated.
+    ///
+    /// # Arguments
+    /// * `account` - The account containing the disputed deposit
+    /// * `reference` - The reference of the original deposit to dispute
+    ///
+    /// # Errors
+    /// - `Error::NotFound` if no deposit exists with the given reference
+    /// - `Error::WrongType` if the referenced transaction is not a deposit
     pub async fn dispute(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
         let tx_to_dispute = self
             .storage
@@ -236,7 +352,7 @@ where
             .ok_or(Error::WrongType)?;
 
         // Happy path, the user still have the amount on hold, otherwise a negative deposit (or a
-        // loan) must be created to compesate
+        // loan) must be created to compensate
 
         let inputs = self
             .storage
@@ -248,13 +364,13 @@ where
         let disputed_ref = format!("dispute:{}", reference);
 
         let disputed_tx = if available_amounts < *disputed_amount {
-            // In this scenario a their main account will go negative, but the 100% positve amount should go to dispute
+            // In this scenario their main account will go negative, but the 100% positive amount should go to dispute
             todo!()
         } else if available_amounts == *disputed_amount {
             // No change
             Transaction::new(inputs, vec![target_in_held], disputed_ref, None)?
         } else {
-            // Move the funds to the held account and get the exchagne back to the main account
+            // Move the funds to the held account and get the exchange back to the main account
             Transaction::new(
                 inputs,
                 vec![
@@ -278,6 +394,19 @@ where
         Ok(())
     }
 
+    /// Resolves a dispute in favor of the account holder, releasing frozen funds.
+    ///
+    /// Moves funds from the Disputed sub-account back to the Main sub-account,
+    /// making them available for spending again. This should be called when an
+    /// investigation determines the original deposit was legitimate.
+    ///
+    /// # Arguments
+    /// * `account` - The account with the disputed funds
+    /// * `reference` - The reference of the original disputed deposit
+    ///
+    /// # Errors
+    /// - `Error::NotFound` if no dispute exists for the given reference
+    /// - `Error::Internal` if disputed funds are missing (should never happen)
     pub async fn resolve(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
         let disputed_ref = format!("dispute:{}", reference);
         let resolved_ref = format!("resolved:{}", reference);
@@ -317,7 +446,7 @@ where
             // No change
             Transaction::new(inputs, vec![restore_tx], resolved_ref, None)?
         } else {
-            // Move the funds to the held account and get the exchagne back to the main account
+            // Move the funds to the held account and get the exchange back to the main account
             Transaction::new(
                 inputs,
                 vec![
@@ -341,6 +470,19 @@ where
         Ok(())
     }
 
+    /// Processes a chargeback, permanently removing funds from the account.
+    ///
+    /// Moves funds from the Disputed sub-account to the Chargeback sub-account,
+    /// recording that the funds have been reversed. Chargebacked funds are tracked
+    /// separately for auditing purposes but are no longer accessible to the account.
+    ///
+    /// # Arguments
+    /// * `account` - The account with the disputed funds
+    /// * `reference` - The reference of the original disputed deposit
+    ///
+    /// # Errors
+    /// - `Error::NotFound` if no dispute exists for the given reference
+    /// - `Error::Internal` if disputed funds are missing (should never happen)
     pub async fn chargeback(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
         let disputed_ref = format!("dispute:{}", reference);
         let chargeback_ref = format!("chargeback:{}", reference);
@@ -383,7 +525,7 @@ where
             // No change
             Transaction::new(inputs, vec![chargeback_tx], chargeback_ref, None)?
         } else {
-            // Move the funds to the held account and get the exchagne back to the main account
+            // Move the funds to the held account and get the exchange back to the main account
             Transaction::new(
                 inputs,
                 vec![
@@ -407,6 +549,14 @@ where
         Ok(())
     }
 
+    /// Transfers funds between accounts (not yet implemented).
+    ///
+    /// This will enable peer-to-peer transfers by consuming UTXOs from the source
+    /// account and creating new UTXOs in the destination account within a single
+    /// atomic transaction.
+    ///
+    /// # Panics
+    /// Currently unimplemented and will panic if called.
     pub fn movement(&self, _from: AccountId, _to: AccountId, _amount: Amount) {
         todo!()
     }

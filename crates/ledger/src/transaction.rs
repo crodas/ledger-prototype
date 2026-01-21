@@ -18,7 +18,7 @@ pub enum Error {
     InvalidFrom,
     #[error("Invalid To in Tx")]
     InvalidTo,
-    #[error("Imbanced transaction")]
+    #[error("Imbalanced transaction")]
     Imbalanced,
 }
 
@@ -27,8 +27,8 @@ pub enum Error {
 /// This is the core unit of the ledger. It is composed by a transaction ID and a position that is
 /// being spent to create this new transaction.
 ///
-/// This simple model, inspired in Bitcoin core arquitecture, takes care of concurrency, as
-/// committing this transcation would flag this UTXO as spent, which could only happen once,
+/// This simple model, inspired by Bitcoin core architecture, takes care of concurrency, as
+/// committing this transaction would flag this UTXO as spent, which could only happen once,
 /// guaranteed by our storage layer.
 ///
 /// This also enable atomic multi-step movement of assets in a single transaction.

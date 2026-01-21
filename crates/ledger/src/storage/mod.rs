@@ -31,7 +31,7 @@ pub enum Error {
 
 /// Extremely simple storage layer
 ///
-/// All math is not done, and its sole responsabilities are storage, durability and correctness.
+/// All math is not done, and its sole responsibilities are storage, durability and correctness.
 #[async_trait::async_trait]
 pub trait Storage {
     /// Get unspent UTXO for this given account. Optionally it be capped to cover a target_amount.
@@ -40,7 +40,7 @@ pub trait Storage {
     ///
     /// This function is used to request balance or to see how much is spendable. All math is
     /// avoided in the storage layer, it is good to keep it as dumb as possible, with one
-    /// responsability, storage and correctness.
+    /// responsibility, storage and correctness.
     async fn get_unspent(
         &self,
         account: &FullAccount,
@@ -57,7 +57,7 @@ pub trait Storage {
     /// Returns an iterator with a list of account. An iterator is used to avoid loading the whole
     /// list (which its size is unknown)
     ///
-    /// It is expected the accounts are sorted naturally for the stream filering to work with
+    /// It is expected the accounts are sorted naturally for the stream filtering to work with
     /// subaccounts
     async fn get_accounts(
         &self,
@@ -76,6 +76,16 @@ pub trait Storage {
 }
 
 #[cfg(test)]
+/// Generates a comprehensive test suite for any `Storage` implementation.
+///
+/// This macro provides reusable tests that verify correct behavior of the
+/// storage contract: UTXO tracking, double-spend prevention, reference
+/// uniqueness, and account isolation.
+///
+/// # Usage
+/// ```ignore
+/// crate::storage_test!(MyStorage::new());
+/// ```
 #[macro_export]
 macro_rules! storage_test {
     ($storage_expr:expr) => {
