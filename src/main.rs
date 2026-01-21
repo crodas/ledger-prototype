@@ -97,6 +97,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .dispute(record.client, record.tx.to_string())
                 .await
                 .map(|_| ()),
+            Action::Resolve => ledger
+                .resolve(record.client, record.tx.to_string())
+                .await
+                .map(|_| ()),
             _ => unreachable!(),
         };
 

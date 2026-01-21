@@ -42,6 +42,9 @@ pub enum Error {
 
     #[error("Overflow or underflow error")]
     Math,
+
+    #[error("Invalid internal state")]
+    Internal,
 }
 
 /// Very simple UTXO based ledger, a simplified version of my own ledger prototype that someday I
@@ -257,6 +260,69 @@ where
                     ),
                 ],
                 disputed_ref,
+                None,
+            )?
+        };
+
+        self.storage.store_tx(disputed_tx).await?;
+
+        Ok(())
+    }
+
+    pub async fn resolve(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
+        let disputed_ref = format!("dispute:{}", reference);
+        let resolved_ref = format!("resolved:{}", reference);
+        let disputed_account = (account, AccountType::Disputed).into();
+        let disputed_tx = self
+            .storage
+            .get_tx_by_reference(&disputed_account, &disputed_ref)
+            .await?
+            .ok_or(Error::NotFound)?;
+
+        let amount_to_restore = disputed_tx
+            .outputs()
+            .iter()
+            .filter_map(|(account, total)| {
+                if *account == disputed_account {
+                    Some(**total)
+                } else {
+                    None
+                }
+            })
+            .sum::<i128>();
+
+        let inputs = self
+            .storage
+            .get_unspent(&disputed_account, Some(amount_to_restore.into()))
+            .await?;
+
+        let available_amounts: i128 = inputs.iter().map(|f| *f.amount()).sum();
+        let restore_tx = (account.into(), amount_to_restore.into());
+
+        let disputed_tx = if available_amounts < amount_to_restore {
+            // This cannot happen, as this account should not let money be moved, other than move it
+            // back to the main when the dispute has been resolved or to locked if it was a
+            // chargeback
+            return Err(Error::Internal);
+        } else if available_amounts == amount_to_restore {
+            // No change
+            Transaction::new(inputs, vec![restore_tx], resolved_ref, None)?
+        } else {
+            // Move the funds to the held account and get the exchagne back to the main account
+            Transaction::new(
+                inputs,
+                vec![
+                    restore_tx,
+                    (
+                        // Exchange
+                        disputed_account,
+                        available_amounts
+                            .checked_sub(amount_to_restore)
+                            .ok_or(Error::Math)?
+                            .into(),
+                    ),
+                ],
+                resolved_ref,
                 None,
             )?
         };
