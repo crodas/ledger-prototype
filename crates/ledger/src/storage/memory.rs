@@ -499,10 +499,7 @@ mod tests {
 
         let tx = make_deposit_tx(account, 100.into(), "deposit-1", 1000);
         let tx_id = tx.id();
-        storage
-            .store_tx(tx)
-            .await
-            .expect("store_tx should succeed");
+        storage.store_tx(tx).await.expect("store_tx should succeed");
 
         let result = storage
             .get_tx_by_reference(&account, &"deposit-1".to_string())
@@ -521,10 +518,7 @@ mod tests {
         let account = make_account(1);
 
         let tx = make_deposit_tx(account, 100.into(), "deposit-1", 1000);
-        storage
-            .store_tx(tx)
-            .await
-            .expect("store_tx should succeed");
+        storage.store_tx(tx).await.expect("store_tx should succeed");
 
         let result = storage
             .get_tx_by_reference(&account, &"nonexistent".to_string())
@@ -541,10 +535,7 @@ mod tests {
         let account2 = make_account(2);
 
         let tx = make_deposit_tx(account1, 100.into(), "deposit-1", 1000);
-        storage
-            .store_tx(tx)
-            .await
-            .expect("store_tx should succeed");
+        storage.store_tx(tx).await.expect("store_tx should succeed");
 
         // Try to get the transaction with the right reference but wrong account
         let result = storage

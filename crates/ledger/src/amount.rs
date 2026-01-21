@@ -1,10 +1,12 @@
 use std::ops::Deref;
 
+use serde::{Deserialize, Serialize};
+
 /// Amount
 ///
 /// The ledger supports negative and positive numbers. By definition the ledger is append only, and
 /// all transactions are final. That's why chargebacks are negative deposits.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Amount(i128);
 
 impl From<i128> for Amount {

@@ -7,6 +7,7 @@ mod transaction;
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use storage::{Memory, Storage};
 use transaction::{HashId, Transaction, Utxo};
 
@@ -58,6 +59,13 @@ impl Default for Ledger<Memory> {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Copy)]
+pub struct Balances {
+    pub main: Amount,
+    pub disputed: Amount,
+    pub total: Amount,
+}
+
 impl<S> Ledger<S>
 where
     S: Storage,
@@ -78,6 +86,29 @@ where
         let tx_id = new_tx.id();
         self.storage.store_tx(new_tx).await?;
         Ok(tx_id)
+    }
+
+    pub async fn get_balances(&self, account: AccountId) -> Result<Balances, Error> {
+        let main = self
+            .storage
+            .get_unspent(&(account, AccountType::Main).into(), None)
+            .await?
+            .into_iter()
+            .map(|u| *u.amount())
+            .sum::<i128>();
+        let disputed = self
+            .storage
+            .get_unspent(&(account, AccountType::Disputed).into(), None)
+            .await?
+            .into_iter()
+            .map(|u| *u.amount())
+            .sum::<i128>();
+
+        Ok(Balances {
+            main: main.into(),
+            disputed: disputed.into(),
+            total: main.checked_sub(disputed).ok_or(Error::Math)?.into(),
+        })
     }
 
     pub async fn withdraw(
@@ -145,7 +176,8 @@ where
         }
 
         let (_, disputed_amount) = tx_to_dispute
-            .outputs().first()
+            .outputs()
+            .first()
             .cloned()
             .ok_or(Error::WrongType)?;
 
@@ -158,7 +190,7 @@ where
             .await?;
         let available_amounts: i128 = inputs.iter().map(|f| *f.amount()).sum();
 
-        let target_in_held = ((account, AccountType::Held).into(), disputed_amount);
+        let target_in_held = ((account, AccountType::Disputed).into(), disputed_amount);
 
         let disputed_tx = if available_amounts < *disputed_amount {
             // In this scenario a their main account will go negative, but the 100% positve amount should go to dispute
@@ -494,7 +526,10 @@ mod tests {
             .deposit(account_id, "deposit-1".to_string(), 50.into())
             .await;
 
-        assert!(matches!(result, Err(Error::Storage(storage::Error::Duplicate))));
+        assert!(matches!(
+            result,
+            Err(Error::Storage(storage::Error::Duplicate))
+        ));
     }
 
     #[tokio::test]

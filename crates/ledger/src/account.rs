@@ -5,15 +5,15 @@ pub type Id = u32;
 pub enum Type {
     /// Normal account types
     Main,
-    /// Sub-account where all the held balance is moved to
-    Held,
+    /// Sub-account where all the disputed balances are moved to
+    Disputed,
 }
 
 impl Type {
     pub fn to_byte(&self) -> u8 {
         match self {
             Type::Main => 0,
-            Type::Held => 1,
+            Type::Disputed => 1,
         }
     }
 }
