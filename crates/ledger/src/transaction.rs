@@ -52,7 +52,7 @@ impl Utxo {
         Self { id, amount }
     }
 
-    fn to_bytes(&self) -> [u8; 33] {
+    fn into_to_bytes(self) -> [u8; 33] {
         let mut bytes = [0u8; 33];
         bytes[..32].copy_from_slice(&self.id.id);
         bytes[32] = self.id.pos;
@@ -128,11 +128,15 @@ impl Transaction {
         &self.to
     }
 
+    pub fn reference(&self) -> Reference {
+        self.reference.clone()
+    }
+
     pub fn id(&self) -> HashId {
         // SHA256(inputs)
         let mut inputs_hasher = Sha256::new();
         for utxo in &self.from {
-            inputs_hasher.update(utxo.to_bytes());
+            inputs_hasher.update(utxo.into_to_bytes());
         }
         let inputs_hash = inputs_hasher.finalize();
 

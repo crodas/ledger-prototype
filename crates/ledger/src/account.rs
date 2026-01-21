@@ -34,6 +34,12 @@ impl From<Id> for FullAccount {
     }
 }
 
+impl From<(Id, Type)> for FullAccount {
+    fn from(value: (Id, Type)) -> Self {
+        FullAccount(value)
+    }
+}
+
 impl FullAccount {
     pub fn to_bytes(&self) -> [u8; 5] {
         let mut bytes = [0u8; 5];

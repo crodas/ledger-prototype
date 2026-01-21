@@ -22,6 +22,12 @@ pub enum Error {
     #[error(transparent)]
     Tx(#[from] transaction::Error),
 
+    #[error("Not found")]
+    NotFound,
+
+    #[error("Wrong transaction type")]
+    WrongType,
+
     #[error(transparent)]
     Storage(#[from] storage::Error),
 
@@ -63,7 +69,7 @@ where
     }
 
     pub async fn deposit(
-        &mut self,
+        &self,
         account: AccountId,
         reference: Reference,
         amount: Amount,
@@ -75,7 +81,7 @@ where
     }
 
     pub async fn withdraw(
-        &mut self,
+        &self,
         account: AccountId,
         reference: Reference,
         amount: Amount,
@@ -102,7 +108,7 @@ where
                         total.checked_sub(*amount).ok_or(Error::Math)?.into(), // exchange
                     ),
                 ],
-                "".to_owned(),
+                format!("Exchange for {}", reference),
                 None,
             )?;
             let withdrawl = Transaction::new(
@@ -125,7 +131,67 @@ where
         Ok(id)
     }
 
-    pub fn movement(&mut self, _from: AccountId, _to: AccountId, _amount: Amount) {
+    /// Creates a dispute
+    pub async fn dispute(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
+        let tx_to_dispute = self
+            .storage
+            .get_tx_by_reference(&account.into(), &reference)
+            .await?
+            .ok_or(Error::NotFound)?;
+
+        if !tx_to_dispute.inputs().is_empty() || tx_to_dispute.outputs().len() != 1 {
+            // Only deposits can be disputed. Deposits have no input and 1 output.
+            return Err(Error::WrongType);
+        }
+
+        let (_, disputed_amount) = tx_to_dispute
+            .outputs().first()
+            .cloned()
+            .ok_or(Error::WrongType)?;
+
+        // Happy path, the user still have the amount on hold, otherwise a negative deposit (or a
+        // loan) must be created to compesate
+
+        let inputs = self
+            .storage
+            .get_unspent(&account.into(), Some(disputed_amount))
+            .await?;
+        let available_amounts: i128 = inputs.iter().map(|f| *f.amount()).sum();
+
+        let target_in_held = ((account, AccountType::Held).into(), disputed_amount);
+
+        let disputed_tx = if available_amounts < *disputed_amount {
+            // In this scenario a their main account will go negative, but the 100% positve amount should go to dispute
+            todo!()
+        } else if available_amounts == *disputed_amount {
+            // No change
+            Transaction::new(inputs, vec![target_in_held], reference, None)?
+        } else {
+            // Move the funds to the held account and get the exchagne back to the main account
+            Transaction::new(
+                inputs,
+                vec![
+                    target_in_held,
+                    (
+                        // Exchange
+                        account.into(),
+                        available_amounts
+                            .checked_sub(*disputed_amount)
+                            .ok_or(Error::Math)?
+                            .into(),
+                    ),
+                ],
+                reference,
+                None,
+            )?
+        };
+
+        self.storage.store_tx(disputed_tx).await?;
+
+        Ok(())
+    }
+
+    pub fn movement(&self, _from: AccountId, _to: AccountId, _amount: Amount) {
         todo!()
     }
 }
@@ -136,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deposit_creates_balance() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         let tx_id = ledger
@@ -150,7 +216,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deposit_and_withdraw_exact_amount() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 100
@@ -170,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_withdraw_partial_amount() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 100
@@ -198,7 +264,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_over_withdrawal_not_possible() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 100
@@ -217,7 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_withdraw_from_empty_account() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Try to withdraw without any deposit
@@ -230,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_deposits_accumulate() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 50 three times
@@ -266,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cannot_withdraw_more_than_remaining_after_partial() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 100
@@ -291,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_different_accounts_isolated() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account1: AccountId = 1;
         let account2: AccountId = 2;
 
@@ -319,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_withdraw_exact_balance_leaves_nothing() {
-        let mut ledger = Ledger::default();
+        let ledger = Ledger::default();
         let account_id: AccountId = 1;
 
         // Deposit 100

@@ -1,5 +1,5 @@
-use crate::FullAccount;
 use crate::transaction::{Transaction, Utxo, UtxoId};
+use crate::{FullAccount, Reference};
 
 use super::Amount;
 
@@ -23,6 +23,9 @@ pub enum Error {
 
     #[error("Duplicate")]
     Duplicate,
+
+    #[error("Error internal")]
+    Internal,
 }
 
 /// Extremely simple storage layer
@@ -43,6 +46,13 @@ pub trait Storage {
         target_amount: Option<Amount>,
     ) -> Result<Vec<Utxo>, Error>;
 
+    /// Get transactions by Reference
+    async fn get_tx_by_reference(
+        &self,
+        account: &FullAccount,
+        reference: &Reference,
+    ) -> Result<Option<Transaction>, Error>;
+
     /// Stores a transaction
     ///
     /// It is important that correctness is kept at all time. For instance if a input UTXO is
@@ -50,5 +60,7 @@ pub trait Storage {
     ///
     /// In the same transaction the transaction is stored and the input UTXO are set as spent. The
     /// entire operations succeeds or it is rollback
+    ///
+    /// References are unique per account as has to be enforced
     async fn store_tx(&self, tx: Transaction) -> Result<(), Error>;
 }

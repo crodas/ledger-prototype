@@ -1,8 +1,8 @@
 //! In memory implementation to show that I know how DB works internally.
-use crate::{FullAccount, transaction::UtxoId};
+use crate::{FullAccount, Reference, transaction::UtxoId};
 
 use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
     Amount,
@@ -21,8 +21,9 @@ struct UtxoInMemory {
 struct InMemoryStorage {
     utxo: HashMap<UtxoId, UtxoInMemory>,
     utxo_by_account: HashMap<FullAccount, VecDeque<UtxoId>>,
-    txs: HashMap<FullAccount, VecDeque<Transaction>>,
-    all_txs: HashSet<HashId>,
+    txs_by_account: HashMap<FullAccount, VecDeque<HashId>>,
+    txs_by_reference: HashMap<(FullAccount, Reference), HashId>,
+    txs: HashMap<HashId, Transaction>,
 }
 
 #[derive(Debug, Default)]
@@ -72,14 +73,40 @@ impl Storage for Memory {
         Ok(result)
     }
 
+    async fn get_tx_by_reference(
+        &self,
+        account: &FullAccount,
+        reference: &Reference,
+    ) -> Result<Option<Transaction>, Error> {
+        let inner = self.inner.read();
+
+        let tx_id = if let Some(tx_id) = inner.txs_by_reference.get(&(*account, reference.clone()))
+        {
+            tx_id
+        } else {
+            return Ok(None);
+        };
+
+        Ok(Some(inner.txs.get(tx_id).ok_or(Error::Internal)?.clone()))
+    }
+
     async fn store_tx(&self, tx: Transaction) -> Result<(), Error> {
         let mut inner = self.inner.write();
 
         let tx_id = tx.id();
 
         // Is it a duplicate tx?
-        if inner.all_txs.contains(&tx_id) {
+        if inner.txs.contains_key(&tx_id) {
             return Err(Error::Duplicate);
+        }
+
+        for (account, _) in tx.outputs().iter() {
+            if inner
+                .txs_by_reference
+                .contains_key(&(*account, tx.reference()))
+            {
+                return Err(Error::Duplicate);
+            }
         }
 
         // check all the utxo are indeed unspent
@@ -100,7 +127,7 @@ impl Storage for Memory {
         }
 
         // All check passed, now do the persitance
-        inner.all_txs.insert(tx_id);
+        inner.txs.insert(tx_id, tx.clone());
 
         // mark the input utxo as spent by this transaction
         for input in tx.inputs() {
@@ -115,10 +142,15 @@ impl Storage for Memory {
         // create the new utox
         for (pos, (account, amount)) in tx.outputs().iter().enumerate() {
             inner
-                .txs
+                .txs_by_account
                 .entry(*account)
                 .or_default()
-                .push_front(tx.clone());
+                .push_front(tx_id);
+
+            inner
+                .txs_by_reference
+                .insert((*account, tx.reference()), tx_id);
+
             let pos = pos.try_into().map_err(|_| Error::Math)?;
             let utxo_id = (tx_id, pos).into();
 
