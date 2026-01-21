@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// A unique identifier for an account.
 ///
 /// Using u16 limits the system to 65,535 accounts, which is sufficient for
@@ -8,7 +10,7 @@ pub type Id = u16;
 ///
 /// The UTXO model uses sub-accounts to separate funds by their state, avoiding
 /// complex state machines and making balance calculations trivial (just sum UTXOs).
-#[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Hash, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Type {
     /// Primary account holding available, spendable funds.
     Main,
@@ -37,7 +39,7 @@ impl Type {
 /// (Main, Disputed, Chargeback) as separate "accounts" while presenting a unified
 /// view to external callers. Ordering is by ID first, then by Type, ensuring
 /// all sub-accounts for a user are grouped together.
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FullAccount((Id, Type));
 
 impl From<Id> for FullAccount {

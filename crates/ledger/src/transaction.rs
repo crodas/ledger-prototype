@@ -1,12 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{Amount, FullAccount, Reference};
 
 pub type HashId = [u8; 32];
 
-#[derive(Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 pub struct UtxoId {
     id: HashId,
     pos: u8,
@@ -32,7 +33,7 @@ pub enum Error {
 /// guaranteed by our storage layer.
 ///
 /// This also enable atomic multi-step movement of assets in a single transaction.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Utxo {
     id: UtxoId,
     amount: Amount,
@@ -44,6 +45,16 @@ impl From<(HashId, u8)> for UtxoId {
             id: value.0,
             pos: value.1,
         }
+    }
+}
+
+impl UtxoId {
+    pub fn hash_id(&self) -> HashId {
+        self.id
+    }
+
+    pub fn pos(&self) -> u8 {
+        self.pos
     }
 }
 
@@ -73,7 +84,7 @@ impl Utxo {
 /// By design all transactions are final, to mimic statuses and the lifecycle of transactions it
 /// would be achieved in another level with multiple accounts type (user.pending, user.available,
 /// user.hold, etc)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     from: Vec<Utxo>,
     to: Vec<(FullAccount, Amount)>,

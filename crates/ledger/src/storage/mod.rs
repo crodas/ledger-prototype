@@ -4,9 +4,13 @@ use crate::{FullAccount, Reference};
 use super::Amount;
 
 mod memory;
+#[cfg(feature = "sqlite")]
+mod sqlite;
 
 use futures::Stream;
 pub use memory::Memory;
+#[cfg(feature = "sqlite")]
+pub use sqlite::Sqlite;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
