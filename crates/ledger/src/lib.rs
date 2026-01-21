@@ -5,8 +5,13 @@ mod amount;
 mod storage;
 mod transaction;
 
-use std::sync::Arc;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use storage::{Memory, Storage};
 use transaction::{HashId, Transaction, Utxo};
@@ -66,6 +71,36 @@ pub struct Balances {
     pub total: Amount,
 }
 
+// A thing wrapper on top of the database removing sub-accounts
+pub struct AccountIterator {
+    inner: Box<dyn Stream<Item = Result<FullAccount, storage::Error>> + 'static + Unpin>,
+    latest: Option<AccountId>,
+}
+
+impl Stream for AccountIterator {
+    type Item = Result<AccountId, Error>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            match Pin::new(&mut this.inner).poll_next(cx) {
+                Poll::Ready(Some(Ok(account))) => {
+                    let account = account.id();
+
+                    if Some(account) != this.latest {
+                        this.latest = Some(account);
+                        return Poll::Ready(Some(Ok(account)));
+                    }
+                    // Skip duplicate account IDs (sub-accounts) and continue polling
+                }
+                Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(Error::from(e)))),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 impl<S> Ledger<S>
 where
     S: Storage,
@@ -86,6 +121,13 @@ where
         let tx_id = new_tx.id();
         self.storage.store_tx(new_tx).await?;
         Ok(tx_id)
+    }
+
+    pub async fn get_accounts(&self) -> impl Stream<Item = Result<AccountId, Error>> {
+        AccountIterator {
+            inner: Box::new(self.storage.get_accounts().await),
+            latest: None,
+        }
     }
 
     pub async fn get_balances(&self, account: AccountId) -> Result<Balances, Error> {
@@ -232,8 +274,16 @@ where
 mod tests {
     use super::*;
 
-    async fn assert_balance(ledger: &Ledger<Memory>, account: AccountId, main: i128, disputed: i128) {
-        let balances = ledger.get_balances(account).await.expect("get_balances should succeed");
+    async fn assert_balance(
+        ledger: &Ledger<Memory>,
+        account: AccountId,
+        main: i128,
+        disputed: i128,
+    ) {
+        let balances = ledger
+            .get_balances(account)
+            .await
+            .expect("get_balances should succeed");
         assert_eq!(*balances.main, main, "main balance mismatch");
         assert_eq!(*balances.disputed, disputed, "disputed balance mismatch");
         assert_eq!(*balances.total, main - disputed, "total balance mismatch");

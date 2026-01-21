@@ -1,8 +1,13 @@
 //! In memory implementation to show that I know how DB works internally.
 use crate::{FullAccount, Reference, transaction::UtxoId};
 
+use futures::Stream;
 use parking_lot::RwLock;
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    sync::Arc,
+    task::Poll,
+};
 
 use crate::{
     Amount,
@@ -21,18 +26,56 @@ struct UtxoInMemory {
 struct InMemoryStorage {
     utxo: HashMap<UtxoId, UtxoInMemory>,
     utxo_by_account: HashMap<FullAccount, VecDeque<UtxoId>>,
-    txs_by_account: HashMap<FullAccount, VecDeque<HashId>>,
+    txs_by_account: BTreeMap<FullAccount, VecDeque<HashId>>,
     txs_by_reference: HashMap<(FullAccount, Reference), HashId>,
     txs: HashMap<HashId, Transaction>,
 }
 
 #[derive(Debug, Default)]
 pub struct Memory {
-    inner: RwLock<InMemoryStorage>,
+    inner: Arc<RwLock<InMemoryStorage>>,
+}
+
+pub struct AccountStream {
+    inner: Arc<RwLock<InMemoryStorage>>,
+    latest: Option<FullAccount>,
+}
+
+impl Stream for AccountStream {
+    type Item = Result<FullAccount, Error>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let inner = this.inner.read();
+
+        if let Some(latest) = this.latest.take() {
+            for (next, _) in inner.txs_by_account.range(latest..) {
+                if *next != latest {
+                    this.latest = Some(*next);
+                    return Poll::Ready(Some(Ok(*next)));
+                }
+            }
+        } else if let Some((next, _)) = inner.txs_by_account.iter().next() {
+            this.latest = Some(*next);
+            return Poll::Ready(Some(Ok(*next)));
+        }
+
+        Poll::Ready(None)
+    }
 }
 
 #[async_trait::async_trait]
 impl Storage for Memory {
+    async fn get_accounts(&self) -> AccountStream {
+        AccountStream {
+            inner: self.inner.clone(),
+            latest: None,
+        }
+    }
+
     async fn get_unspent(
         &self,
         account: &FullAccount,

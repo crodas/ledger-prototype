@@ -41,6 +41,14 @@ impl From<(Id, Type)> for FullAccount {
 }
 
 impl FullAccount {
+    pub fn id(&self) -> Id {
+        self.0.0
+    }
+
+    pub fn typ(&self) -> Type {
+        self.0.1
+    }
+
     pub fn to_bytes(&self) -> [u8; 3] {
         let mut bytes = [0u8; 3];
         bytes[..2].copy_from_slice(&self.0.0.to_le_bytes());

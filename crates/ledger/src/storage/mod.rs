@@ -5,6 +5,7 @@ use super::Amount;
 
 mod memory;
 
+use futures::Stream;
 pub use memory::Memory;
 
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +53,15 @@ pub trait Storage {
         account: &FullAccount,
         reference: &Reference,
     ) -> Result<Option<Transaction>, Error>;
+
+    /// Returns an iterator with a list of account. An iterator is used to avoid loading the whole
+    /// list (which its size is unknown)
+    ///
+    /// It is expected the accounts are sorted naturally for the stream filering to work with
+    /// subaccounts
+    async fn get_accounts(
+        &self,
+    ) -> impl Stream<Item = Result<FullAccount, Error>> + Send + Sync + 'static + Unpin;
 
     /// Stores a transaction
     ///
