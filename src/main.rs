@@ -101,7 +101,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .resolve(record.client, record.tx.to_string())
                 .await
                 .map(|_| ()),
-            _ => unreachable!(),
+            Action::Chargeback => ledger
+                .chargeback(record.client, record.tx.to_string())
+                .await
+                .map(|_| ()),
         };
 
         if let Err(err) = result {
@@ -140,8 +143,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .disputed
                 .to_f64(AMOUNT_PRECISION)
                 .expect("valid f64"),
-            available: balance.main.to_f64(AMOUNT_PRECISION).expect("valid f64"),
-            locked: false,
+            available: balance
+                .available
+                .to_f64(AMOUNT_PRECISION)
+                .expect("valid f64"),
+            locked: (*balance.chargeback) > 0,
         };
 
         if let Err(err) = wtr.serialize(record) {

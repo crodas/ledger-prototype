@@ -7,6 +7,8 @@ pub enum Type {
     Main,
     /// Sub-account where all the disputed balances are moved to
     Disputed,
+    /// Sub-account to record all chargebacks
+    Chargeback,
 }
 
 impl Type {
@@ -14,14 +16,9 @@ impl Type {
         match self {
             Type::Main => 0,
             Type::Disputed => 1,
+            Type::Chargeback => 2,
         }
     }
-}
-
-/// Account Status
-pub enum Status {
-    Operational,
-    Locked,
 }
 
 /// Internal full Account Id
@@ -55,9 +52,4 @@ impl FullAccount {
         bytes[2] = self.0.1.to_byte();
         bytes
     }
-}
-
-pub struct Account {
-    id: Id,
-    status: Status,
 }

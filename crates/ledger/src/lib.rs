@@ -69,8 +69,9 @@ impl Default for Ledger<Memory> {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Copy)]
 pub struct Balances {
-    pub main: Amount,
+    pub available: Amount,
     pub disputed: Amount,
+    pub chargeback: Amount,
     pub total: Amount,
 }
 
@@ -148,11 +149,19 @@ where
             .into_iter()
             .map(|u| *u.amount())
             .sum::<i128>();
+        let chargeback = self
+            .storage
+            .get_unspent(&(account, AccountType::Chargeback).into(), None)
+            .await?
+            .into_iter()
+            .map(|u| *u.amount())
+            .sum::<i128>();
 
         Ok(Balances {
-            main: main.into(),
+            available: main.into(),
             disputed: disputed.into(),
-            total: main.checked_sub(disputed).ok_or(Error::Math)?.into(),
+            chargeback: chargeback.into(),
+            total: main.checked_add(disputed).ok_or(Error::Math)?.into(),
         })
     }
 
@@ -332,6 +341,72 @@ where
         Ok(())
     }
 
+    pub async fn chargeback(&self, account: AccountId, reference: Reference) -> Result<(), Error> {
+        let disputed_ref = format!("dispute:{}", reference);
+        let chargeback_ref = format!("chargeback:{}", reference);
+        let disputed_account = (account, AccountType::Disputed).into();
+        let disputed_tx = self
+            .storage
+            .get_tx_by_reference(&disputed_account, &disputed_ref)
+            .await?
+            .ok_or(Error::NotFound)?;
+
+        let amount_to_chargeback = disputed_tx
+            .outputs()
+            .iter()
+            .filter_map(|(account, total)| {
+                if *account == disputed_account {
+                    Some(**total)
+                } else {
+                    None
+                }
+            })
+            .sum::<i128>();
+
+        let inputs = self
+            .storage
+            .get_unspent(&disputed_account, Some(amount_to_chargeback.into()))
+            .await?;
+
+        let available_amounts: i128 = inputs.iter().map(|f| *f.amount()).sum();
+        let chargeback_tx = (
+            (account, AccountType::Chargeback).into(),
+            amount_to_chargeback.into(),
+        );
+
+        let chargeback_tx = if available_amounts < amount_to_chargeback {
+            // This cannot happen, as this account should not let money be moved, other than move it
+            // back to the main when the dispute has been resolved or to locked if it was a
+            // chargeback
+            return Err(Error::Internal);
+        } else if available_amounts == amount_to_chargeback {
+            // No change
+            Transaction::new(inputs, vec![chargeback_tx], chargeback_ref, None)?
+        } else {
+            // Move the funds to the held account and get the exchagne back to the main account
+            Transaction::new(
+                inputs,
+                vec![
+                    chargeback_tx,
+                    (
+                        // Exchange
+                        disputed_account,
+                        available_amounts
+                            .checked_sub(amount_to_chargeback)
+                            .ok_or(Error::Math)?
+                            .into(),
+                    ),
+                ],
+                chargeback_ref,
+                None,
+            )?
+        };
+
+        self.storage.store_tx(chargeback_tx).await?;
+
+        Ok(())
+    }
+
     pub fn movement(&self, _from: AccountId, _to: AccountId, _amount: Amount) {
         todo!()
     }
@@ -351,9 +426,9 @@ mod tests {
             .get_balances(account)
             .await
             .expect("get_balances should succeed");
-        assert_eq!(*balances.main, main, "main balance mismatch");
+        assert_eq!(*balances.available, main, "main balance mismatch");
         assert_eq!(*balances.disputed, disputed, "disputed balance mismatch");
-        assert_eq!(*balances.total, main - disputed, "total balance mismatch");
+        assert_eq!(*balances.total, main + disputed, "total balance mismatch");
     }
 
     #[tokio::test]
