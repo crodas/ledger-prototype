@@ -233,13 +233,14 @@ where
         let available_amounts: i128 = inputs.iter().map(|f| *f.amount()).sum();
 
         let target_in_held = ((account, AccountType::Disputed).into(), disputed_amount);
+        let disputed_ref = format!("dispute:{}", reference);
 
         let disputed_tx = if available_amounts < *disputed_amount {
             // In this scenario a their main account will go negative, but the 100% positve amount should go to dispute
             todo!()
         } else if available_amounts == *disputed_amount {
             // No change
-            Transaction::new(inputs, vec![target_in_held], reference, None)?
+            Transaction::new(inputs, vec![target_in_held], disputed_ref, None)?
         } else {
             // Move the funds to the held account and get the exchagne back to the main account
             Transaction::new(
@@ -255,7 +256,7 @@ where
                             .into(),
                     ),
                 ],
-                reference,
+                disputed_ref,
                 None,
             )?
         };
@@ -764,7 +765,13 @@ mod tests {
         // Create disputes for some accounts (this creates sub-accounts internally)
         for &id in &[2, 5, 8] {
             ledger
-                .dispute(id, format!("deposit-{}", account_ids.iter().position(|&x| x == id).unwrap()))
+                .dispute(
+                    id,
+                    format!(
+                        "deposit-{}",
+                        account_ids.iter().position(|&x| x == id).unwrap()
+                    ),
+                )
                 .await
                 .expect("dispute should succeed");
         }

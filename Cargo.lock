@@ -194,8 +194,10 @@ name = "kraken"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "futures",
  "ledger",
  "serde",
+ "tokio",
 ]
 
 [[package]]

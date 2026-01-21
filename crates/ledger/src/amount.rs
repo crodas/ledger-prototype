@@ -51,6 +51,26 @@ impl Amount {
 
         Ok(Amount(chopped as i128))
     }
+
+    pub fn to_f64(&self, precision: u8) -> Result<f64, Error> {
+        // 10^precision as f64
+        let scale = 10f64.powi(precision as i32);
+
+        // Convert i128 -> f64 (note: large values may lose integer precision in f64)
+        let value = self.0 as f64;
+
+        if !value.is_finite() || !scale.is_finite() || scale == 0.0 {
+            return Err(Error::Math);
+        }
+
+        let out = value / scale;
+
+        if !out.is_finite() {
+            return Err(Error::Math);
+        }
+
+        Ok(out)
+    }
 }
 
 #[cfg(test)]

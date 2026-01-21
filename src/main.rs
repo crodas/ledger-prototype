@@ -2,8 +2,9 @@ use std::env;
 use std::error::Error;
 
 use csv::Trim;
+use futures::StreamExt;
 use ledger::{AccountId, Amount, Ledger};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const AMOUNT_PRECISION: u8 = 4;
 
@@ -21,6 +22,15 @@ enum Action {
     Chargeback,
 }
 
+#[derive(Serialize, Clone, Debug)]
+struct CsvAccount {
+    client: AccountId,
+    available: f64,
+    held: f64,
+    total: f64,
+    locked: bool,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 struct CsvEntry {
     #[serde(rename = "type")]
@@ -31,7 +41,8 @@ struct CsvEntry {
     amount: Option<f64>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <transactions.csv>", args[0]);
@@ -42,13 +53,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .trim(Trim::All) // <-- trims leading & trailing whitespace
         .from_path(&args[1])?;
 
-    let _ledger = Ledger::default();
+    let ledger = Ledger::default();
 
     for (line, result) in reader.deserialize::<CsvEntry>().enumerate() {
         let record = match result {
             Ok(result) => result,
             Err(err) => {
-                println!("Failed to parse line {}: {:?}", line, err);
+                eprintln!("Failed to parse line {}: {:?}", line, err);
                 continue;
             }
         };
@@ -60,13 +71,78 @@ fn main() -> Result<(), Box<dyn Error>> {
         {
             Ok(amount) => amount,
             Err(err) => {
-                println!("Error parsing the amount {err}");
+                eprintln!("Error parsing the amount {err}");
                 continue;
             }
         };
 
-        // TODO: parse record and call ledger methods
-        println!("{:?} {:?}", record, amount);
+        let result = match record.typ {
+            Action::Deposit => ledger
+                .deposit(
+                    record.client,
+                    record.tx.to_string(),
+                    amount.expect("missing amount"),
+                )
+                .await
+                .map(|_| ()),
+            Action::Withdrawal => ledger
+                .withdraw(
+                    record.client,
+                    record.tx.to_string(),
+                    amount.expect("missing amount"),
+                )
+                .await
+                .map(|_| ()),
+            Action::Dispute => ledger
+                .dispute(record.client, record.tx.to_string())
+                .await
+                .map(|_| ()),
+            _ => unreachable!(),
+        };
+
+        if let Err(err) = result {
+            eprintln!("Error processing {:?}  with {}", record, err);
+        }
+    }
+
+    let mut accounts = ledger.get_accounts().await;
+
+    let mut wtr = csv::Writer::from_writer(std::io::stdout());
+
+    while let Some(account) = accounts.next().await {
+        let account = match account {
+            Ok(account) => account,
+            Err(err) => {
+                eprintln!("Error reading account {:?}", err);
+                continue;
+            }
+        };
+
+        let balance = match ledger.get_balances(account).await {
+            Ok(balance) => balance,
+            Err(err) => {
+                eprintln!(
+                    "Error reading balance for customer {} with err {:?}",
+                    account, err
+                );
+                continue;
+            }
+        };
+
+        let record = CsvAccount {
+            client: account,
+            total: balance.total.to_f64(AMOUNT_PRECISION).expect("valid f64"),
+            held: balance
+                .disputed
+                .to_f64(AMOUNT_PRECISION)
+                .expect("valid f64"),
+            available: balance.main.to_f64(AMOUNT_PRECISION).expect("valid f64"),
+            locked: false,
+        };
+
+        if let Err(err) = wtr.serialize(record) {
+            eprintln!("Error serializing {:?}", err);
+        }
     }
 
     Ok(())
