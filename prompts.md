@@ -32,3 +32,10 @@ Add a tests where user have 3 deposits (a: 10, b: 5), withdraw 11, then deposit 
 --
 
 Update the tests and use get_balance to check the ledger is behaving as expected
+
+
+--
+
+Write a test for both the in memory implemetnation of get accounts and the ledger version (which does not return sub accounts). Test that the memory returns in order.
+
+Create many operations before writing each tests, the idea is to get multipel accounts. Add a loop or something so the code is short.

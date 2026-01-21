@@ -656,4 +656,50 @@ mod tests {
 
         assert!(result.is_none());
     }
+
+    #[tokio::test]
+    async fn test_get_accounts_returns_in_order() {
+        use futures::StreamExt;
+        use crate::AccountType;
+
+        let storage = Memory::default();
+
+        // Create accounts in non-sequential order to verify sorting
+        let account_ids: Vec<AccountId> = vec![5, 2, 8, 1, 9, 3, 7, 4, 6, 10];
+        for (i, &id) in account_ids.iter().enumerate() {
+            let account = make_account(id);
+            let tx = make_deposit_tx(account, 100.into(), &format!("deposit-{}", i), (i * 1000) as u64);
+            storage.store_tx(tx).await.expect("deposit should succeed");
+        }
+
+        // Also create some disputed sub-accounts for a few accounts
+        for &id in &[2, 5, 8] {
+            let disputed_account: FullAccount = (id, AccountType::Disputed).into();
+            let tx = make_deposit_tx(disputed_account, 50.into(), &format!("disputed-{}", id), 100000);
+            storage.store_tx(tx).await.expect("disputed deposit should succeed");
+        }
+
+        // Collect all accounts from the stream
+        let mut stream = storage.get_accounts().await;
+        let mut accounts: Vec<FullAccount> = Vec::new();
+        while let Some(result) = stream.next().await {
+            accounts.push(result.expect("stream should not error"));
+        }
+
+        // Verify accounts are returned in sorted order (by id, then by type)
+        let mut sorted = accounts.clone();
+        sorted.sort();
+        assert_eq!(accounts, sorted, "accounts should be returned in sorted order");
+
+        // Verify we got all accounts (10 main + 3 disputed = 13)
+        assert_eq!(accounts.len(), 13);
+
+        // Verify the first few are in expected order: (1, Main), (2, Main), (2, Disputed), ...
+        assert_eq!(accounts[0].id(), 1);
+        assert_eq!(accounts[0].typ(), AccountType::Main);
+        assert_eq!(accounts[1].id(), 2);
+        assert_eq!(accounts[1].typ(), AccountType::Main);
+        assert_eq!(accounts[2].id(), 2);
+        assert_eq!(accounts[2].typ(), AccountType::Disputed);
+    }
 }

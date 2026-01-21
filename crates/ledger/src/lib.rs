@@ -745,4 +745,45 @@ mod tests {
 
         assert!(matches!(result, Err(Error::NotEnough)));
     }
+
+    #[tokio::test]
+    async fn test_get_accounts_returns_unique_ids_no_sub_accounts() {
+        use futures::StreamExt;
+
+        let ledger = Ledger::default();
+
+        // Create multiple accounts in non-sequential order using a loop
+        let account_ids: Vec<AccountId> = vec![5, 2, 8, 1, 9, 3, 7, 4, 6, 10];
+        for (i, &id) in account_ids.iter().enumerate() {
+            ledger
+                .deposit(id, format!("deposit-{}", i), 100.into())
+                .await
+                .expect("deposit should succeed");
+        }
+
+        // Create disputes for some accounts (this creates sub-accounts internally)
+        for &id in &[2, 5, 8] {
+            ledger
+                .dispute(id, format!("deposit-{}", account_ids.iter().position(|&x| x == id).unwrap()))
+                .await
+                .expect("dispute should succeed");
+        }
+
+        // Collect all accounts from the ledger's get_accounts
+        let mut stream = ledger.get_accounts().await;
+        let mut accounts: Vec<AccountId> = Vec::new();
+        while let Some(result) = stream.next().await {
+            accounts.push(result.expect("stream should not error"));
+        }
+
+        // Verify we got exactly 10 unique account IDs (no sub-accounts)
+        assert_eq!(accounts.len(), 10);
+
+        // Verify all expected accounts are present
+        let mut sorted_expected = account_ids.clone();
+        sorted_expected.sort();
+        let mut sorted_actual = accounts.clone();
+        sorted_actual.sort();
+        assert_eq!(sorted_actual, sorted_expected);
+    }
 }
