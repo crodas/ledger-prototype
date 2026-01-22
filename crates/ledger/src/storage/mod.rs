@@ -531,6 +531,89 @@ macro_rules! storage_test {
             assert!(result.is_none());
         }
 
+        /// Regression test: get_unspent should return ALL unspent UTXOs, not stop at first spent one.
+        ///
+        /// Bug scenario: When iterating through UTXOs, if a spent UTXO is encountered,
+        /// the iteration should continue (not break) to find any unspent UTXOs that
+        /// come after the spent one in the list.
+        #[tokio::test]
+        async fn test_get_unspent_continues_past_spent_utxos() {
+            let storage = $storage_expr;
+            let account = make_account(1);
+
+            // Step 1: Create first deposit (utxo_a at 100)
+            let deposit_a = make_deposit_tx(account, 100.into(), "deposit-a", 1000);
+            let deposit_a_id = deposit_a.id();
+            storage
+                .store_tx(deposit_a)
+                .await
+                .expect("deposit A should succeed");
+
+            // Step 2: Create second deposit (utxo_b at 50)
+            // After this, the deque order is: [utxo_b, utxo_a]
+            let deposit_b = make_deposit_tx(account, 50.into(), "deposit-b", 2000);
+            let deposit_b_id = deposit_b.id();
+            storage
+                .store_tx(deposit_b)
+                .await
+                .expect("deposit B should succeed");
+
+            // Verify we have 2 unspent UTXOs
+            let unspent = storage
+                .get_unspent(&account, None)
+                .await
+                .expect("get_unspent should succeed");
+            assert_eq!(unspent.len(), 2, "should have 2 unspent UTXOs before spend");
+
+            // Step 3: Spend utxo_b (the one at the front), creating utxo_c
+            // After this, the deque order is: [utxo_c, utxo_b(spent), utxo_a]
+            let utxo_b = make_utxo(deposit_b_id, 0, 50.into());
+            let spend_tx = Transaction::new(
+                vec![utxo_b],
+                vec![(account, 50.into())],
+                "spend-b".to_string(),
+                Some(3000),
+            )
+            .expect("spend transaction should be valid");
+            let spend_tx_id = spend_tx.id();
+            storage
+                .store_tx(spend_tx)
+                .await
+                .expect("spend should succeed");
+
+            // Step 4: Get unspent - should return BOTH utxo_c (from spend) AND utxo_a (original)
+            // The bug was that iteration would stop at utxo_b (spent) and miss utxo_a
+            let unspent = storage
+                .get_unspent(&account, None)
+                .await
+                .expect("get_unspent should succeed after spend");
+
+            // We should have 2 unspent UTXOs: utxo_c (50) and utxo_a (100)
+            assert_eq!(
+                unspent.len(),
+                2,
+                "should have 2 unspent UTXOs: the new one from spend and the original deposit A"
+            );
+
+            // Verify we have the correct UTXOs
+            let utxo_ids: Vec<_> = unspent.iter().map(|u| u.id()).collect();
+            let utxo_c_id = (spend_tx_id, 0).into();
+            let utxo_a_id = (deposit_a_id, 0).into();
+
+            assert!(
+                utxo_ids.contains(&utxo_c_id),
+                "should contain utxo_c from spend tx"
+            );
+            assert!(
+                utxo_ids.contains(&utxo_a_id),
+                "should contain utxo_a from original deposit A"
+            );
+
+            // Verify amounts
+            let total: i128 = unspent.iter().map(|u| *u.amount()).sum();
+            assert_eq!(total, 150, "total unspent should be 100 + 50 = 150");
+        }
+
         #[tokio::test]
         async fn test_get_accounts_returns_in_order() {
             use futures::StreamExt;

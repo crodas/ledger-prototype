@@ -99,8 +99,7 @@ impl Storage for Memory {
                 .ok_or(Error::MissingUtxo(*utxo_id))?;
 
             if info.spent_at.is_some() {
-                // We already reached the end, as the store_tx will put the stored utxo to the end
-                break;
+                continue;
             }
 
             result.push(Utxo::new(*utxo_id, info.amount));
